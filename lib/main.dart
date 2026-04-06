@@ -1,78 +1,119 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+const firebaseOptions = FirebaseOptions(
+  apiKey: "AIzaSyC0rFOiAx5LEpT-6s9Bc8sxNtc59RfsOcM",
+  authDomain: "u-coffee.firebaseapp.com",
+  databaseURL: "https://u-coffee-default-rtdb.firebaseio.com",
+  projectId: "u-coffee",
+  storageBucket: "u-coffee.firebasestorage.app",
+  messagingSenderId: "971000964907",
+  appId: "1:971000964907:web:b1e9271ca53fbfff6ac76e",
+  measurementId: "G-M5HM5H2D75"
+);
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ru_RU', null);
+  await Firebase.initializeApp(options: firebaseOptions);
   runApp(const MockApp());
 }
 // ==========================================
-// Модели и Стейт (Мок Базы Данных)
+// Модели и Стейт (Синхронизация Firebase Firestore)
 // ==========================================
 enum ShiftType { none, full, morning, evening }
 enum PrefType { none, ready, readyAfter15, readyBefore15, notReady }
 class AppState extends ChangeNotifier {
   final List<String> baristas = ['Юрий', 'Валерия', 'Дарьяна', 'Анастасия'];
-  final Map<String, Map<String, ShiftType>> shifts = {};
-  final Map<String, Map<String, PrefType>> prefs = {};
-  final List<String> auditLogs = [];
+  Map<String, Map<String, ShiftType>> shifts = {};
+  Map<String, Map<String, PrefType>> prefs = {};
+  List<String> auditLogs = [];
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  AppState() {
+    _initStreams();
+  }
+  void _initStreams() {
+    // 1. Слушаем смены онлайн
+    _db.collection('settings').doc('shifts').snapshots().listen((snap) {
+      if (snap.exists) {
+        final data = snap.data() as Map<String, dynamic>;
+        shifts.clear();
+        data.forEach((barista, datesMap) {
+          shifts[barista] = {};
+          (datesMap as Map<String, dynamic>).forEach((date, typeIndex) {
+            shifts[barista]![date] = ShiftType.values[(typeIndex as num).toInt()];
+          });
+        });
+        notifyListeners();
+      }
+    });
+    // 2. Слушаем пожелания онлайн
+    _db.collection('settings').doc('prefs').snapshots().listen((snap) {
+      if (snap.exists) {
+        final data = snap.data() as Map<String, dynamic>;
+        prefs.clear();
+        data.forEach((barista, datesMap) {
+          prefs[barista] = {};
+          (datesMap as Map<String, dynamic>).forEach((date, typeIndex) {
+            prefs[barista]![date] = PrefType.values[(typeIndex as num).toInt()];
+          });
+        });
+        notifyListeners();
+      }
+    });
+    // 3. Слушаем историю изменений
+    _db.collection('logs').orderBy('time', descending: true).limit(50).snapshots().listen((snap) {
+      auditLogs = snap.docs.map((doc) => doc.data()['text'] as String).toList();
+      notifyListeners();
+    });
+  }
   String _dateKey(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
-  void toggleShift(String barista, DateTime date) {
-    if (!shifts.containsKey(barista)) shifts[barista] = {};
+  Future<void> toggleShift(String barista, DateTime date) async {
     String key = _dateKey(date);
-    ShiftType current = shifts[barista]![key] ?? ShiftType.none;
+    ShiftType current = shifts[barista]?[key] ?? ShiftType.none;
     ShiftType next;
     String actionName;
     switch (current) {
-      case ShiftType.none:
-        next = ShiftType.full;
-        actionName = 'Полная смена';
-        break;
-      case ShiftType.full:
-        next = ShiftType.morning;
-        actionName = 'Утро';
-        break;
-      case ShiftType.morning:
-        next = ShiftType.evening;
-        actionName = 'Вечер';
-        break;
-      case ShiftType.evening:
-        next = ShiftType.none;
-        actionName = 'Снята смена';
-        break;
+      case ShiftType.none: next = ShiftType.full; actionName = 'Полная смена'; break;
+      case ShiftType.full: next = ShiftType.morning; actionName = 'Утро'; break;
+      case ShiftType.morning: next = ShiftType.evening; actionName = 'Вечер'; break;
+      case ShiftType.evening: next = ShiftType.none; actionName = 'Снята смена'; break;
     }
+    // Оптимистичное обновление UI (чтобы мигало сразу, а потом улетало в базу)
+    if (!shifts.containsKey(barista)) shifts[barista] = {};
     shifts[barista]![key] = next;
-    
+    notifyListeners();
+    // Сохранение в базу
+    await _db.collection('settings').doc('shifts').set({
+      barista: { key: next.index }
+    }, SetOptions(merge: true));
     final timeStr = DateFormat('HH:mm').format(DateTime.now());
     final dateStr = DateFormat('dd.MM').format(date);
-    auditLogs.insert(0, '$timeStr - $barista: $actionName на $dateStr');
-    
-    notifyListeners();
+    await _db.collection('logs').add({
+      'text': '$timeStr - $barista: $actionName на $dateStr',
+      'time': FieldValue.serverTimestamp(),
+    });
   }
-  void togglePref(String barista, DateTime date) {
-    if (!prefs.containsKey(barista)) prefs[barista] = {};
+  Future<void> togglePref(String barista, DateTime date) async {
     String key = _dateKey(date);
-    PrefType current = prefs[barista]![key] ?? PrefType.none;
+    PrefType current = prefs[barista]?[key] ?? PrefType.none;
     PrefType next;
     switch (current) {
-      case PrefType.none:
-        next = PrefType.ready;
-        break;
-      case PrefType.ready:
-        next = PrefType.readyAfter15;
-        break;
-      case PrefType.readyAfter15:
-        next = PrefType.readyBefore15;
-        break;
-      case PrefType.readyBefore15:
-        next = PrefType.notReady;
-        break;
-      case PrefType.notReady:
-        next = PrefType.none;
-        break;
+      case PrefType.none: next = PrefType.ready; break;
+      case PrefType.ready: next = PrefType.readyAfter15; break;
+      case PrefType.readyAfter15: next = PrefType.readyBefore15; break;
+      case PrefType.readyBefore15: next = PrefType.notReady; break;
+      case PrefType.notReady: next = PrefType.none; break;
     }
+    // Оптимистичное обновление UI
+    if (!prefs.containsKey(barista)) prefs[barista] = {};
     prefs[barista]![key] = next;
     notifyListeners();
+    // Сохранение в базу
+    await _db.collection('settings').doc('prefs').set({
+      barista: { key: next.index }
+    }, SetOptions(merge: true));
   }
   ShiftType getShift(String barista, DateTime date) {
     return shifts[barista]?[_dateKey(date)] ?? ShiftType.none;
@@ -115,14 +156,14 @@ class MockApp extends StatelessWidget {
     return AppStateProvider(
       state: AppState(),
       child: MaterialApp(
-        title: 'Ю Кофе (Мобайл)',
+        title: 'Ю Кофе (Онлайн)',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4E342E)),
           scaffoldBackgroundColor: const Color(0xFFFFF8E1),
           appBarTheme: const AppBarTheme(
-            centerTitle: true, // Центрируем как в iOS
+            centerTitle: true,
             backgroundColor: Color(0xFF4E342E),
             foregroundColor: Colors.white,
             elevation: 0,
@@ -158,14 +199,14 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(child: screens[_currentIndex]), // Защита от челок (iOS Dynamic Island и вырезов Android)
+      body: SafeArea(child: screens[_currentIndex]), 
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (i) => setState(() => _currentIndex = i),
         selectedItemColor: const Color(0xFF4E342E),
         unselectedItemColor: Colors.grey,
         backgroundColor: const Color(0xFFFFF8E1),
-        type: BottomNavigationBarType.fixed, // Предотвращает дергание на узких экранах
+        type: BottomNavigationBarType.fixed, 
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: 'График'),
           BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'Итоги'),
@@ -194,7 +235,7 @@ class CalendarUtils {
   }
 }
 // ==========================================
-// 1. Экран Графика (Оптимизированный под мобайл)
+// 1. Экран Графика 
 // ==========================================
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
@@ -214,7 +255,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final monthName = DateFormat('LLLL yyyy', 'ru_RU').format(_selectedMonth);
     return Column(
       children: [
-        // Шапка и навигация с адаптивным Wrap
         Container(
           color: Colors.brown.shade50,
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
@@ -229,7 +269,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 ],
               ),
               const SizedBox(height: 8),
-              // Wrap для того чтобы на узких телефонах чипсы переносились на вторую строку
               Wrap(
                 alignment: WrapAlignment.center,
                 spacing: 8,
@@ -250,7 +289,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
         ),
         
-        // Легенда
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
           child: Wrap(
@@ -264,7 +302,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ],
           ),
         ),
-        // Сетка (Занимает 60% экрана по вертикали)
         Expanded(
           flex: 5,
           child: SingleChildScrollView(
@@ -272,7 +309,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: SingleChildScrollView(
               child: Table(
-                defaultColumnWidth: const FixedColumnWidth(50.0), // Чуть ужали для узких экранов
+                defaultColumnWidth: const FixedColumnWidth(50.0), 
                 columnWidths: const { 0: FixedColumnWidth(85.0) },
                 border: TableBorder.all(color: Colors.brown.shade200, borderRadius: BorderRadius.circular(4)),
                 children: [
@@ -289,7 +326,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   ...state.baristas.map((barista) {
                     return TableRow(
                       children: [
-                        // InkWell для красивого "нативного" эффекта нажатия
                         InkWell(
                           onTap: () => _showEmployeeStats(context, state, barista),
                           child: Container(
@@ -316,7 +352,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               margin: const EdgeInsets.all(2),
                               decoration: BoxDecoration(
                                 color: cellColor,
-                                borderRadius: BorderRadius.circular(6), // Более скругленные углы (iOS style)
+                                borderRadius: BorderRadius.circular(6), 
                               ),
                             ),
                           );
@@ -329,7 +365,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
           ),
         ),
-        // Блок истории (Занимает 25% экрана по вертикали)
         Expanded(
           flex: 2,
           child: Container(
@@ -348,11 +383,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                  child: const Text('История изменений', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  child: const Text('История изменений (Livestream)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                 ),
                 Expanded(
                   child: state.auditLogs.isEmpty 
-                    ? const Center(child: Text('Изменений пока нет', style: TextStyle(color: Colors.grey, fontSize: 12)))
+                    ? const Center(child: Text('Изменений пока нет\nИли нет соединения', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 12)))
                     : ListView.separated(
                         itemCount: state.auditLogs.length,
                         separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
@@ -385,7 +420,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      isScrollControlled: true, // Позволяет шторке подстраиваться
+      isScrollControlled: true, 
       builder: (ctx) {
         return SafeArea(
           child: StatefulBuilder(
@@ -440,7 +475,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 }
 // ==========================================
-// 2. Экран Отчетов (Оптимизирован)
+// 2. Экран Отчетов
 // ==========================================
 class ReportScreen extends StatefulWidget {
   const ReportScreen({super.key});
@@ -503,7 +538,7 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 }
 // ==========================================
-// 3. Экран Пожеланий (Оптимизирован)
+// 3. Экран Пожеланий
 // ==========================================
 class PreferencesScreen extends StatefulWidget {
   const PreferencesScreen({super.key});
