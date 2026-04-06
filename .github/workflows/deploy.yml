@@ -10,20 +10,21 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Убираем предупреждение из ошибки
     steps:
-      - uses: actions/checkout@v4 # Обновлено до v4
+      - uses: actions/checkout@v4
       
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.19.0' # Указываем конкретную версию для стабильности
           
       - name: Build Web
         run: flutter build web --release --base-href /${{ github.event.repository.name }}/
         
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4 # Обновлено до v4
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/web
