@@ -1,5 +1,5 @@
 name: u_coffee
-description: Приложение для графиков кофейни Ю кофе.
+description: Coffee shop app
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  intl: ^0.18.1 # Библиотека для дат и валют
+  intl: ^0.18.1
 
 dev_dependencies:
   flutter_test:
