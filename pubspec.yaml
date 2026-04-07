@@ -1,14 +1,21 @@
-name: yu_coffee_web
-description: A new Flutter Web project.
+name: u_coffee
+description: Coffee shop management app
 publish_to: 'none'
 version: 1.0.0+1
+
 environment:
-  sdk: '>=3.2.0 <4.0.0'
+  sdk: '>=3.0.0 <4.0.0'
+
 dependencies:
   flutter:
     sdk: flutter
-  intl: ^0.19.0
+  intl: ^0.18.1
   firebase_core: ^2.24.2
-  cloud_firestore: ^4.13.6
+  cloud_firestore: ^4.14.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
 flutter:
   uses-material-design: true
