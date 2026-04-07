@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
 const firebaseOptions = FirebaseOptions(
   apiKey: "AIzaSyC0rFOiAx5LEpT-6s9Bc8sxNtc59RfsOcM",
   authDomain: "u-coffee.firebaseapp.com",
@@ -14,42 +13,26 @@ const firebaseOptions = FirebaseOptions(
   appId: "1:971000964907:web:b1e9271ca53fbfff6ac76e",
   measurementId: "G-M5HM5H2D75"
 );
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ru_RU', null);
   await Firebase.initializeApp(options: firebaseOptions);
   runApp(const MockApp());
 }
-
 // ==========================================
 // Модели и Стейт (Синхронизация Firebase Firestore)
 // ==========================================
-
 enum ShiftType { none, full, morning, evening }
 enum PrefType { none, ready, readyAfter15, readyBefore15, notReady }
-
 class AppState extends ChangeNotifier {
   final List<String> baristas = ['Юрий', 'Валерия', 'Дарьяна', 'Анастасия'];
-  
-  // Ставки для расчета зарплаты (оптимизация)
-  final Map<String, double> rates = {
-    'Юрий': 350.0,
-    'Валерия': 300.0,
-    'Дарьяна': 280.0,
-    'Анастасия': 280.0,
-  };
-
   Map<String, Map<String, ShiftType>> shifts = {};
   Map<String, Map<String, PrefType>> prefs = {};
   List<String> auditLogs = [];
-
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-
   AppState() {
     _initStreams();
   }
-
   void _initStreams() {
     // 1. Слушаем смены онлайн
     _db.collection('settings').doc('shifts').snapshots().listen((snap) {
@@ -65,7 +48,6 @@ class AppState extends ChangeNotifier {
         notifyListeners();
       }
     });
-
     // 2. Слушаем пожелания онлайн
     _db.collection('settings').doc('prefs').snapshots().listen((snap) {
       if (snap.exists) {
@@ -80,20 +62,16 @@ class AppState extends ChangeNotifier {
         notifyListeners();
       }
     });
-
     // 3. Слушаем историю изменений
     _db.collection('logs').orderBy('time', descending: true).limit(50).snapshots().listen((snap) {
       auditLogs = snap.docs.map((doc) => doc.data()['text'] as String).toList();
       notifyListeners();
     });
   }
-
   String _dateKey(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
-
   Future<void> toggleShift(String barista, DateTime date) async {
     String key = _dateKey(date);
     ShiftType current = shifts[barista]?[key] ?? ShiftType.none;
-
     ShiftType next;
     String actionName;
     switch (current) {
@@ -102,17 +80,14 @@ class AppState extends ChangeNotifier {
       case ShiftType.morning: next = ShiftType.evening; actionName = 'Вечер'; break;
       case ShiftType.evening: next = ShiftType.none; actionName = 'Снята смена'; break;
     }
-
-    // Оптимистичное обновление UI
+    // Оптимистичное обновление UI (чтобы мигало сразу, а потом улетало в базу)
     if (!shifts.containsKey(barista)) shifts[barista] = {};
     shifts[barista]![key] = next;
     notifyListeners();
-
-    // ИСПРАВЛЕНИЕ: Сохранение в базу через точечную нотацию
+    // Сохранение в базу
     await _db.collection('settings').doc('shifts').set({
-      '$barista.$key': next.index 
+      barista: { key: next.index }
     }, SetOptions(merge: true));
-
     final timeStr = DateFormat('HH:mm').format(DateTime.now());
     final dateStr = DateFormat('dd.MM').format(date);
     await _db.collection('logs').add({
@@ -120,11 +95,9 @@ class AppState extends ChangeNotifier {
       'time': FieldValue.serverTimestamp(),
     });
   }
-
   Future<void> togglePref(String barista, DateTime date) async {
     String key = _dateKey(date);
     PrefType current = prefs[barista]?[key] ?? PrefType.none;
-
     PrefType next;
     switch (current) {
       case PrefType.none: next = PrefType.ready; break;
@@ -133,26 +106,21 @@ class AppState extends ChangeNotifier {
       case PrefType.readyBefore15: next = PrefType.notReady; break;
       case PrefType.notReady: next = PrefType.none; break;
     }
-
     // Оптимистичное обновление UI
     if (!prefs.containsKey(barista)) prefs[barista] = {};
     prefs[barista]![key] = next;
     notifyListeners();
-
-    // ИСПРАВЛЕНИЕ: Сохранение в базу через точечную нотацию
+    // Сохранение в базу
     await _db.collection('settings').doc('prefs').set({
-      '$barista.$key': next.index
+      barista: { key: next.index }
     }, SetOptions(merge: true));
   }
-
   ShiftType getShift(String barista, DateTime date) {
     return shifts[barista]?[_dateKey(date)] ?? ShiftType.none;
   }
-
   PrefType getPref(String barista, DateTime date) {
     return prefs[barista]?[_dateKey(date)] ?? PrefType.none;
   }
-
   double getHoursForMonth(String barista, DateTime month) {
     if (!shifts.containsKey(barista)) return 0;
     
@@ -166,14 +134,6 @@ class AppState extends ChangeNotifier {
     });
     return totalHours;
   }
-
-  // ДОБАВЛЕНО: Расчет зарплаты для отчета
-  double getSalaryForMonth(String barista, DateTime month) {
-    double hours = getHoursForMonth(barista, month);
-    double rate = rates[barista] ?? 250.0;
-    return hours * rate;
-  }
-
   int getFullShiftsCount(String barista, DateTime month) {
     if (!shifts.containsKey(barista)) return 0;
     int count = 0;
@@ -186,14 +146,11 @@ class AppState extends ChangeNotifier {
     return count;
   }
 }
-
 // ==========================================
 // Приложение и Навигация
 // ==========================================
-
 class MockApp extends StatelessWidget {
   const MockApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return AppStateProvider(
@@ -217,34 +174,28 @@ class MockApp extends StatelessWidget {
     );
   }
 }
-
 class AppStateProvider extends InheritedNotifier<AppState> {
   const AppStateProvider({
     Key? key,
     required AppState state,
     required Widget child,
   }) : super(key: key, notifier: state, child: child);
-
   static AppState of(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<AppStateProvider>()!.notifier!;
   }
 }
-
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
   @override
   State<MainScreen> createState() => _MainScreenState();
 }
-
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
-
   final screens = const [
     ScheduleScreen(),
     ReportScreen(),
     PreferencesScreen(),
   ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -265,11 +216,9 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 }
-
 // ==========================================
 // Утилиты для Календаря
 // ==========================================
-
 class CalendarUtils {
   static List<DateTime> getDaysInWeek(DateTime month, int weekIndex) {
     int startDay = weekIndex * 7 + 1;
@@ -278,7 +227,6 @@ class CalendarUtils {
     int lastDayOfMonth = DateTime(month.year, month.month + 1, 0).day;
     if (endDay > lastDayOfMonth) endDay = lastDayOfMonth;
     if (startDay > lastDayOfMonth) return []; 
-
     List<DateTime> days = [];
     for (int i = startDay; i <= endDay; i++) {
       days.add(DateTime(month.year, month.month, i));
@@ -286,31 +234,25 @@ class CalendarUtils {
     return days;
   }
 }
-
 // ==========================================
 // 1. Экран Графика 
 // ==========================================
-
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
   @override
   State<ScheduleScreen> createState() => _ScheduleScreenState();
 }
-
 class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   int _selectedWeek = 0;
-
   void _nextMonth() => setState(() { _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1); _selectedWeek = 0; });
   void _prevMonth() => setState(() { _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1); _selectedWeek = 0; });
   void _setWeek(int index) => setState(() => _selectedWeek = index);
-
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
     final daysToRender = CalendarUtils.getDaysInWeek(_selectedMonth, _selectedWeek);
     final monthName = DateFormat('LLLL yyyy', 'ru_RU').format(_selectedMonth);
-
     return Column(
       children: [
         Container(
@@ -360,7 +302,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ],
           ),
         ),
-
         Expanded(
           flex: 5,
           child: SingleChildScrollView(
@@ -403,7 +344,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                             case ShiftType.evening: cellColor = Colors.purple.shade300; break;
                             case ShiftType.none: cellColor = Colors.transparent; break;
                           }
-
                           return InkWell(
                             onTap: () => state.toggleShift(barista, date),
                             child: AnimatedContainer(
@@ -425,7 +365,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
           ),
         ),
-
         Expanded(
           flex: 2,
           child: Container(
@@ -467,7 +406,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ],
     );
   }
-
   Widget _legendDot(Color color, String label) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -478,7 +416,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ],
     );
   }
-
   void _showEmployeeStats(BuildContext context, AppState state, String barista) {
     showModalBottomSheet(
       context: context,
@@ -523,7 +460,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       }
     );
   }
-
   Widget _statCard(String label, String value, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
@@ -538,25 +474,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 }
-
 // ==========================================
-// 2. Экран Отчетов (Добавлен расчет зарплаты)
+// 2. Экран Отчетов
 // ==========================================
-
 class ReportScreen extends StatefulWidget {
   const ReportScreen({super.key});
   @override
   State<ReportScreen> createState() => _ReportScreenState();
 }
-
 class _ReportScreenState extends State<ReportScreen> {
   DateTime _reportMonth = DateTime(DateTime.now().year, DateTime.now().month);
-
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
     final monthName = DateFormat('LLLL yyyy', 'ru_RU').format(_reportMonth);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Итоги за месяц')),
       body: Column(
@@ -584,7 +515,6 @@ class _ReportScreenState extends State<ReportScreen> {
               itemBuilder: (context, i) {
                 String barista = state.baristas[i];
                 double hours = state.getHoursForMonth(barista, _reportMonth);
-                double salary = state.getSalaryForMonth(barista, _reportMonth);
                 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -595,8 +525,7 @@ class _ReportScreenState extends State<ReportScreen> {
                     child: ListTile(
                       leading: CircleAvatar(backgroundColor: Colors.brown.shade200, child: Text(barista[0], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
                       title: Text(barista, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      subtitle: Text('Отработано: ${hours.toStringAsFixed(0)} ч.', style: const TextStyle(fontSize: 13)),
-                      trailing: Text('${salary.toStringAsFixed(0)} ₽', style: const TextStyle(fontSize: 22, color: Color(0xFF4E342E), fontWeight: FontWeight.w900)),
+                      trailing: Text('${hours.toStringAsFixed(0)} ч.', style: const TextStyle(fontSize: 22, color: Color(0xFF4E342E), fontWeight: FontWeight.w900)),
                     ),
                   ),
                 );
@@ -608,30 +537,24 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 }
-
 // ==========================================
 // 3. Экран Пожеланий
 // ==========================================
-
 class PreferencesScreen extends StatefulWidget {
   const PreferencesScreen({super.key});
   @override
   State<PreferencesScreen> createState() => _PreferencesScreenState();
 }
-
 class _PreferencesScreenState extends State<PreferencesScreen> {
   String? _selectedBarista;
   DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   int _selectedWeek = 0;
-
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
     _selectedBarista ??= state.baristas.first;
-
     final daysToRender = CalendarUtils.getDaysInWeek(_selectedMonth, _selectedWeek);
     final monthName = DateFormat('LLLL yyyy', 'ru_RU').format(_selectedMonth);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Мои пожелания')),
       body: Column(
@@ -683,7 +606,6 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
               }),
             ),
           ),
-
           const SizedBox(height: 12),
           Wrap(
              alignment: WrapAlignment.center,
@@ -714,7 +636,6 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                   case PrefType.notReady: bg = Colors.red.shade200; statusText = "Не могу"; break;
                   case PrefType.none: bg = Colors.white; statusText = "Не выбрано"; break;
                 }
-
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   color: bg,
@@ -741,7 +662,6 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
       ),
     );
   }
-
   Widget _prefLegend(Color c, String text) {
      return Row(mainAxisSize: MainAxisSize.min, children: [
         Container(width: 14, height: 14, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(4))),
