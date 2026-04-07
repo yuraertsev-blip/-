@@ -41,8 +41,17 @@ class AppState extends ChangeNotifier {
   String? lastError;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // --- НОВАЯ ПЕРЕМЕННАЯ: Статус администратора ---
+  bool isAdmin = false;
+
   AppState() {
     _initStreams();
+  }
+
+  // --- МЕТОД ДЛЯ ВКЛЮЧЕНИЯ АДМИНА ---
+  void setAdmin(bool value) {
+    isAdmin = value;
+    notifyListeners();
   }
 
   void _initStreams() {
@@ -96,6 +105,9 @@ class AppState extends ChangeNotifier {
   String _dateKey(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
 
   Future<void> toggleShift(String barista, DateTime date) async {
+    // ЗАЩИТА: Если не админ, функция прерывается
+    if (!isAdmin) return;
+
     String key = _dateKey(date);
     ShiftType current = shifts[barista]?[key] ?? ShiftType.none;
     ShiftType next = ShiftType.none;
@@ -235,7 +247,8 @@ class MockApp extends StatelessWidget {
             elevation: 0,
           ),
         ),
-        home: const MainScreen(),
+        // ИЗМЕНЕНО: Стартовый экран теперь Экран Входа
+        home: const LoginScreen(),
       ),
     );
   }
@@ -250,6 +263,101 @@ class AppStateProvider extends InheritedNotifier<AppState> {
 
   static AppState of(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<AppStateProvider>()!.notifier!;
+  }
+}
+
+// ==========================================
+// НОВЫЙ ЭКРАН: Вход и Выбор Роли
+// ==========================================
+
+class LoginScreen extends StatelessWidget {
+  const LoginScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppStateProvider.of(context);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF4E342E),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.coffee, size: 80, color: Color(0xFFFFF8E1)),
+              const SizedBox(height: 20),
+              const Text('Ю КОФЕ', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 2)),
+              const SizedBox(height: 10),
+              const Text('Система управления', style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 60),
+              
+              // Кнопка для бариста (Только чтение графика)
+              SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.person),
+                  label: const Text('Войти как Бариста', style: TextStyle(fontSize: 16)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFF8E1), foregroundColor: const Color(0xFF4E342E)),
+                  onPressed: () {
+                    state.setAdmin(false); // Обычный режим
+                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Кнопка для Админа (Требует ПИН-код)
+              SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.admin_panel_settings),
+                  label: const Text('Управляющий', style: TextStyle(fontSize: 16)),
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54)),
+                  onPressed: () => _showPinDialog(context, state),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPinDialog(BuildContext context, AppState state) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ввод PIN-кода'),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          obscureText: true, // Скрывает вводимые символы
+          decoration: const InputDecoration(labelText: 'PIN', hintText: 'Введите пин-код'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4E342E), foregroundColor: Colors.white),
+            onPressed: () {
+              // ПАРОЛЬ ТУТ: Поменяй '1234' на нужный тебе
+              if (ctrl.text == '1234') { 
+                state.setAdmin(true); // Включаем режим Админа
+                Navigator.pop(ctx);
+                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
+              } else {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Неверный PIN-код')));
+              }
+            },
+            child: const Text('Войти'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -345,6 +453,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
     return Column(
       children: [
+        // --- ПЛАШКА АДМИНА ---
+        if (state.isAdmin)
+          Container(
+            width: double.infinity,
+            color: Colors.red.shade100,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: const Text('Вы в режиме редактирования графика (Админ)', textAlign: TextAlign.center, style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+          ),
+
         if (state.lastError != null)
           Container(
             padding: const EdgeInsets.all(8),
@@ -453,7 +570,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               break;
                           }
                           return InkWell(
-                            onTap: () => _safeToggleShift(state, barista, date),
+                            // ЗАЩИТА UI: Клик работает только если Админ
+                            onTap: state.isAdmin ? () => _safeToggleShift(state, barista, date) : () {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Только администратор может изменять график'), duration: Duration(seconds: 2)));
+                            },
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
                               height: 55,
@@ -772,6 +892,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                     borderRadius: BorderRadius.circular(12),
                     onTap: () async {
                       try {
+                        // Оставлять пожелания могут все (и бариста, и админ)
                         await state.togglePref(_selectedBarista!, date);
                       } catch (e) {}
                     },
