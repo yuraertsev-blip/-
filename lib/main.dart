@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 const firebaseOptions = FirebaseOptions(
   apiKey: "AIzaSyC0rFOiAx5LEpT-6s9Bc8sxNtc59RfsOcM",
   authDomain: "u-coffee.firebaseapp.com",
@@ -14,7 +15,9 @@ const firebaseOptions = FirebaseOptions(
   appId: "1:971000964907:web:b1e9271ca53fbfff6ac76e",
   measurementId: "G-M5HM5H2D75",
 );
+
 late final AppState globalAppState;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ru_RU', null);
@@ -23,11 +26,14 @@ void main() async {
   } catch (e) {
     debugPrint("Firebase init error: $e");
   }
+
   globalAppState = AppState();
   runApp(const MockApp());
 }
+
 enum ShiftType { none, full, morning, evening }
 enum PrefType { none, ready, readyAfter15, readyBefore15, notReady }
+
 class AppState extends ChangeNotifier {
   final List<String> baristas = ['Юрий', 'Валерия', 'Дарьяна', 'Анастасия'];
   Map<String, Map<String, ShiftType>> shifts = {};
@@ -36,16 +42,14 @@ class AppState extends ChangeNotifier {
   String? lastError;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  // --- НОВАЯ ПЕРЕМЕННАЯ: Статус администратора ---
-  bool isAdmin = false;
+
   // Статус администратора — определяется через Firebase Auth
   bool get isAdmin => _auth.currentUser?.email == 'admin@u-coffee.app';
+
   AppState() {
     _initStreams();
   }
-  // --- МЕТОД ДЛЯ ВКЛЮЧЕНИЯ АДМИНА ---
-  void setAdmin(bool value) {
-    isAdmin = value;
+
   /// Вход админа через Firebase Auth — пароль проверяется сервером
   Future<String?> signInAdmin(String pin) async {
     try {
@@ -62,11 +66,13 @@ class AppState extends ChangeNotifier {
       return 'Ошибка авторизации: ${e.message}';
     }
   }
+
   /// Выход из аккаунта
   Future<void> signOut() async {
     await _auth.signOut();
     notifyListeners();
   }
+
   void _initStreams() {
     try {
       _db.collection('schedule_shifts_v2').snapshots().listen((snap) {
@@ -85,6 +91,7 @@ class AppState extends ChangeNotifier {
         lastError = e.toString();
         notifyListeners();
       });
+
       _db.collection('schedule_prefs_v2').snapshots().listen((snap) {
         prefs.clear();
         for (var doc in snap.docs) {
@@ -98,6 +105,7 @@ class AppState extends ChangeNotifier {
         }
         notifyListeners();
       });
+
       _db
           .collection('logs_v2')
           .orderBy('time', descending: true)
@@ -112,14 +120,18 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
   }
+
   String _dateKey(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
+
   Future<void> toggleShift(String barista, DateTime date) async {
     // ЗАЩИТА: Если не админ, функция прерывается
     if (!isAdmin) return;
+
     String key = _dateKey(date);
     ShiftType current = shifts[barista]?[key] ?? ShiftType.none;
     ShiftType next = ShiftType.none;
     String actionName = '';
+
     switch (current) {
       case ShiftType.none:
         next = ShiftType.full;
@@ -138,14 +150,17 @@ class AppState extends ChangeNotifier {
         actionName = 'Снята смена';
         break;
     }
+
     if (!shifts.containsKey(barista)) shifts[barista] = {};
     shifts[barista]![key] = next;
     lastError = null;
     notifyListeners();
+
     try {
       await _db.collection('schedule_shifts_v2').doc(key).set({
         barista: next.index
       }, SetOptions(merge: true));
+
       final timeStr = DateFormat('HH:mm').format(DateTime.now());
       final dateStr = DateFormat('dd.MM').format(date);
       await _db.collection('logs_v2').add({
@@ -157,10 +172,12 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
   }
+
   Future<void> togglePref(String barista, DateTime date) async {
     String key = _dateKey(date);
     PrefType current = prefs[barista]?[key] ?? PrefType.none;
     PrefType next = PrefType.none;
+
     switch (current) {
       case PrefType.none:
         next = PrefType.ready;
@@ -178,10 +195,12 @@ class AppState extends ChangeNotifier {
         next = PrefType.none;
         break;
     }
+
     if (!prefs.containsKey(barista)) prefs[barista] = {};
     prefs[barista]![key] = next;
     lastError = null;
     notifyListeners();
+
     try {
       await _db.collection('schedule_prefs_v2').doc(key).set({
         barista: next.index
@@ -191,12 +210,15 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
   }
+
   ShiftType getShift(String barista, DateTime date) {
     return shifts[barista]?[_dateKey(date)] ?? ShiftType.none;
   }
+
   PrefType getPref(String barista, DateTime date) {
     return prefs[barista]?[_dateKey(date)] ?? PrefType.none;
   }
+
   double getHoursForMonth(String barista, DateTime month) {
     if (!shifts.containsKey(barista)) return 0;
     double totalHours = 0;
@@ -209,6 +231,7 @@ class AppState extends ChangeNotifier {
     });
     return totalHours;
   }
+
   /// Часы за конкретный диапазон дней (учитывает 28/29/30/31)
   double getHoursForPeriod(String barista, DateTime month, int fromDay, int toDay) {
     if (!shifts.containsKey(barista)) return 0;
@@ -225,6 +248,7 @@ class AppState extends ChangeNotifier {
     });
     return total;
   }
+
   int getFullShiftsCount(String barista, DateTime month) {
     if (!shifts.containsKey(barista)) return 0;
     int count = 0;
@@ -237,8 +261,10 @@ class AppState extends ChangeNotifier {
     return count;
   }
 }
+
 class MockApp extends StatelessWidget {
   const MockApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return AppStateProvider(
@@ -263,24 +289,30 @@ class MockApp extends StatelessWidget {
     );
   }
 }
+
 class AppStateProvider extends InheritedNotifier<AppState> {
   const AppStateProvider({
     super.key,
     required AppState state,
     required Widget child,
   }) : super(notifier: state, child: child);
+
   static AppState of(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<AppStateProvider>()!.notifier!;
   }
 }
+
 // ==========================================
 // НОВЫЙ ЭКРАН: Вход и Выбор Роли
 // ==========================================
+
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
+
     return Scaffold(
       backgroundColor: const Color(0xFF4E342E),
       body: Center(
@@ -296,7 +328,6 @@ class LoginScreen extends StatelessWidget {
               const Text('Система управления', style: TextStyle(color: Colors.white70)),
               const SizedBox(height: 60),
               
-              // Кнопка для бариста (Только чтение графика)
               // Бариста — вход без авторизации (только чтение графика + пожелания)
               SizedBox(
                 width: double.infinity,
@@ -306,14 +337,12 @@ class LoginScreen extends StatelessWidget {
                   label: const Text('Войти как Бариста', style: TextStyle(fontSize: 16)),
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFF8E1), foregroundColor: const Color(0xFF4E342E)),
                   onPressed: () {
-                    state.setAdmin(false); // Обычный режим
                     Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
                   },
                 ),
               ),
               const SizedBox(height: 16),
               
-              // Кнопка для Админа (Требует ПИН-код)
               // Админ — вход через Firebase Auth
               SizedBox(
                 width: double.infinity,
@@ -331,35 +360,13 @@ class LoginScreen extends StatelessWidget {
       ),
     );
   }
+
   void _showPinDialog(BuildContext context, AppState state) {
     final ctrl = TextEditingController();
     bool isLoading = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ввод PIN-кода'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          obscureText: true, // Скрывает вводимые символы
-          decoration: const InputDecoration(labelText: 'PIN', hintText: 'Введите пин-код'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена', style: TextStyle(color: Colors.grey))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4E342E), foregroundColor: Colors.white),
-            onPressed: () {
-              // ПАРОЛЬ ТУТ: Поменяй '1234' на нужный тебе
-              if (ctrl.text == '1234') { 
-                state.setAdmin(true); // Включаем режим Админа
-                Navigator.pop(ctx);
-                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
-              } else {
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Неверный PIN-код')));
-              }
-            },
-            child: const Text('Войти'),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           title: const Text('Ввод PIN-кода'),
@@ -370,7 +377,6 @@ class LoginScreen extends StatelessWidget {
             enabled: !isLoading,
             decoration: const InputDecoration(labelText: 'PIN', hintText: 'Введите пин-код'),
           ),
-        ],
           actions: [
             TextButton(
               onPressed: isLoading ? null : () => Navigator.pop(ctx),
@@ -402,11 +408,14 @@ class LoginScreen extends StatelessWidget {
     );
   }
 }
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
+
   @override
   State<MainScreen> createState() => _MainScreenState();
 }
+
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   final screens = const [
@@ -414,6 +423,7 @@ class _MainScreenState extends State<MainScreen> {
     ReportScreen(),
     PreferencesScreen(),
   ];
+
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
@@ -453,6 +463,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 }
+
 class CalendarUtils {
   static List<DateTime> getDaysInWeek(DateTime month, int weekIndex) {
     int startDay = weekIndex * 7 + 1;
@@ -467,23 +478,30 @@ class CalendarUtils {
     return days;
   }
 }
+
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
+
   @override
   State<ScheduleScreen> createState() => _ScheduleScreenState();
 }
+
 class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   int _selectedWeek = 0;
+
   void _nextMonth() => setState(() {
         _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1);
         _selectedWeek = 0;
       });
+
   void _prevMonth() => setState(() {
         _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
         _selectedWeek = 0;
       });
+
   void _setWeek(int index) => setState(() => _selectedWeek = index);
+
   void _safeToggleShift(AppState state, String barista, DateTime date) {
     try {
       state.toggleShift(barista, date);
@@ -493,11 +511,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       );
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
     final daysToRender = CalendarUtils.getDaysInWeek(_selectedMonth, _selectedWeek);
     final monthName = DateFormat('LLLL yyyy', 'ru_RU').format(_selectedMonth);
+
     return Column(
       children: [
         // --- ПЛАШКА АДМИНА ---
@@ -508,6 +528,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: const Text('Вы в режиме редактирования графика (Админ)', textAlign: TextAlign.center, style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
           ),
+
         if (state.lastError != null)
           Container(
             padding: const EdgeInsets.all(8),
@@ -680,6 +701,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ],
     );
   }
+
   Widget _legendDot(Color color, String label) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -690,6 +712,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ],
     );
   }
+
   void _showEmployeeStats(BuildContext context, AppState state, String barista) {
     showModalBottomSheet(
       context: context,
@@ -732,6 +755,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       },
     );
   }
+
   Widget _statCard(String label, String value, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
@@ -746,18 +770,23 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 }
+
 class ReportScreen extends StatefulWidget {
   const ReportScreen({super.key});
+
   @override
   State<ReportScreen> createState() => _ReportScreenState();
 }
+
 class _ReportScreenState extends State<ReportScreen> {
   DateTime _reportMonth = DateTime(DateTime.now().year, DateTime.now().month);
+
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
     final monthName = DateFormat('LLLL yyyy', 'ru_RU').format(_reportMonth);
     final lastDay = DateTime(_reportMonth.year, _reportMonth.month + 1, 0).day;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Итоги за месяц')),
       body: Column(
@@ -797,21 +826,15 @@ class _ReportScreenState extends State<ReportScreen> {
               itemCount: state.baristas.length,
               itemBuilder: (context, i) {
                 String barista = state.baristas[i];
-                double hours = state.getHoursForMonth(barista, _reportMonth);
                 double firstHalf = state.getHoursForPeriod(barista, _reportMonth, 1, 15);
                 double secondHalf = state.getHoursForPeriod(barista, _reportMonth, 16, lastDay);
                 double total = firstHalf + secondHalf;
+
                 return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
                   margin: const EdgeInsets.only(bottom: 10),
                   elevation: 2,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: ListTile(
-                      leading: CircleAvatar(backgroundColor: Colors.brown.shade200, child: Text(barista[0], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                      title: Text(barista, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      trailing: Text('${hours.toStringAsFixed(0)} ч.', style: const TextStyle(fontSize: 22, color: Color(0xFF4E342E), fontWeight: FontWeight.w900)),
                     padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                     child: Row(
                       children: [
@@ -833,21 +856,26 @@ class _ReportScreenState extends State<ReportScreen> {
     );
   }
 }
+
 class PreferencesScreen extends StatefulWidget {
   const PreferencesScreen({super.key});
+
   @override
   State<PreferencesScreen> createState() => _PreferencesScreenState();
 }
+
 class _PreferencesScreenState extends State<PreferencesScreen> {
   String? _selectedBarista;
   DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   int _selectedWeek = 0;
+
   @override
   Widget build(BuildContext context) {
     final state = AppStateProvider.of(context);
     _selectedBarista ??= state.baristas.first;
     final daysToRender = CalendarUtils.getDaysInWeek(_selectedMonth, _selectedWeek);
     final monthName = DateFormat('LLLL yyyy', 'ru_RU').format(_selectedMonth);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Мои пожелания')),
       body: Column(
@@ -918,6 +946,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
               itemBuilder: (context, i) {
                 final date = daysToRender[i];
                 PrefType type = state.getPref(_selectedBarista!, date);
+
                 Color bg;
                 String statusText;
                 switch (type) {
@@ -942,6 +971,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                     statusText = "Не выбрано";
                     break;
                 }
+
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   color: bg,
@@ -973,6 +1003,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
       ),
     );
   }
+
   Widget _prefLegend(Color c, String text) {
     return Row(
       mainAxisSize: MainAxisSize.min,
